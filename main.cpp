@@ -227,9 +227,9 @@ int main()
     net::io_context io_context;
     // Create and launch a listening port
     //listener lis(io_context, tcp::endpoint{address, port});
-    listener listen(io_context, tcp::endpoint{address, port});
-    listen.run();
-    //std::make_shared<listener>(io_context, tcp::endpoint{address, port})->run();
+    //listener listen(io_context, tcp::endpoint{address, port});
+    //listen.run();
+    std::make_shared<listener>(io_context, tcp::endpoint{address, port})->run();
 
     // Run the I/O service on the requested number of threads
 
