@@ -8,9 +8,7 @@
 #include <memory>
 #include <string>
 #include <deque>
-#include <set>
-
-#include "chat_message.hpp"
+#include <unordered_set>
 
 namespace beast = boost::beast;         // from <boost/beast.hpp>
 namespace http = beast::http;           // from <boost/beast/http.hpp>
@@ -53,7 +51,7 @@ public:
 private:
     chat_message_que recent_message;
     enum {max_recent_message = 100};
-    std::set<chat_participant_ptr> participants_;
+    std::unordered_set<chat_participant_ptr> participants_;
 
 };
 
@@ -97,12 +95,23 @@ public:
 
         do_read();
     }
+
+    void deliver(const std::string& msg)
+    {
+        bool write_in_progress = !write_message.empty();
+        write_message.push_back(msg);
+        if (!write_in_progress)
+        {
+            do_write();
+        }
+    }
+
     void do_read() {
         auto self(shared_from_this());
         ws_.async_read(buffer_, [this, self](boost::beast::error_code ec, std::size_t size)
                         {
             if(!ec) {
-                //on_read();
+                on_read(ec, size);
                 ws_.text(ws_.got_text());
                 std::ostringstream os;
                 os << boost::beast::make_printable(buffer_.data());
@@ -114,6 +123,21 @@ public:
                 room_.leave(shared_from_this());
             }
                         });
+    }
+
+    void on_read(boost::beast::error_code ec, std::size_t bytes_trans) {
+        if(!ec) {
+            std::stringstream message;
+            ws_.text(ws_.got_text());
+            std::ostringstream os;
+            os << boost::beast::make_printable(buffer_.data());
+            read_message = os.str();
+            room_.deliver(read_message);
+            do_read();
+        }
+        else {
+            room_.leave(shared_from_this());
+        }
     }
 
     void do_write() {
@@ -196,14 +220,16 @@ int main()
 {
     auto const address = net::ip::make_address(reinterpret_cast<const char *>("127.0.0.1"));
     auto const port = static_cast<unsigned short>(8080);
-    auto const threads = std::max<int>(1,(1));
+    //auto const threads = std::max<int>(1,(1));
 
     // The io_context is required for all I/O
     //net::io_context ioc{threads};
     net::io_context io_context;
     // Create and launch a listening port
     //listener lis(io_context, tcp::endpoint{address, port});
-    std::make_shared<listener>(io_context, tcp::endpoint{address, port})->run();
+    listener listen(io_context, tcp::endpoint{address, port});
+    listen.run();
+    //std::make_shared<listener>(io_context, tcp::endpoint{address, port})->run();
 
     // Run the I/O service on the requested number of threads
 
