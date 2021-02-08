@@ -16,14 +16,15 @@ namespace beast = boost::beast;         // from <boost/beast.hpp>
 namespace http = beast::http;           // from <boost/beast/http.hpp>
 namespace websocket = beast::websocket; // from <boost/beast/websocket.hpp>
 namespace net = boost::asio;            // from <boost/asio.hpp>
+
 using tcp = boost::asio::ip::tcp;       // from <boost/asio/ip/tcp.hpp>
 
-typedef std::deque<chat_message> chat_message_que;
+typedef std::deque<std::string> chat_message_que;
 
 class chat_participant {
 public:
     virtual ~chat_participant() = default;
-    virtual void deliver(const chat_message& message) = 0;
+    virtual void deliver(const std::string& message) = 0;
 };
 
 typedef std::shared_ptr<chat_participant> chat_participant_ptr;
@@ -40,7 +41,7 @@ public:
         participants_.erase(participant);
     }
 
-    void deliver(const chat_message& message) {
+    void deliver(const std::string& message) {
         recent_message.push_back(message);
         while (recent_message.size() > max_recent_message) {
             recent_message.pop_front();
@@ -98,42 +99,21 @@ public:
     }
     void do_read() {
         auto self(shared_from_this());
-        ws_.async_read(net::buffer(read_message.body(),chat_message::header_length),
-                        [this, self](boost::system::error_code ec, std::size_t size)
+        ws_.async_read(buffer_, [this, self](boost::beast::error_code ec, std::size_t size)
                         {
             if(!ec) {
-                read_body();
+                //on_read();
+                ws_.text(ws_.got_text());
+                std::ostringstream os;
+                os << boost::beast::make_printable(buffer_.data());
+                read_message = os.str();
+                write_message.push_front(read_message);
+                do_read();
             }
             else {
                 room_.leave(shared_from_this());
             }
                         });
-    }
-
-    void read_body()  {
-        auto self(shared_from_this());
-        ws_.async_read(net::buffer(read_message.body(), read_message.body_length()),
-                                [this, self](boost::system::error_code ec, std::size_t size)
-                                {
-                                    if (!ec)
-                                    {
-                                        room_.deliver(read_message);
-                                        do_read();
-                                    }
-                                    else
-                                    {
-                                        room_.leave(shared_from_this());
-                                    }
-                                });
-    }
-    void deliver(const chat_message& msg) override
-    {
-        bool write_in_progress = !write_message.empty();
-        write_message.push_back(msg);
-        if (!write_in_progress)
-        {
-            do_write();
-        }
     }
 
     void do_write() {
@@ -152,7 +132,7 @@ public:
         });
     }
 
-    chat_message read_message;
+    std::string read_message;
     chat_room& room_;
     chat_message_que write_message;
 };
