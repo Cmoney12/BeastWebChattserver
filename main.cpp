@@ -97,12 +97,23 @@ public:
 
         do_read();
     }
+
+    void deliver(const std::string& msg)
+    {
+        bool write_in_progress = !write_message.empty();
+        write_message.push_back(msg);
+        if (!write_in_progress)
+        {
+            do_write();
+        }
+    }
+
     void do_read() {
         auto self(shared_from_this());
         ws_.async_read(buffer_, [this, self](boost::beast::error_code ec, std::size_t size)
                         {
             if(!ec) {
-                //on_read();
+                on_read(ec, size);
                 ws_.text(ws_.got_text());
                 std::ostringstream os;
                 os << boost::beast::make_printable(buffer_.data());
@@ -114,6 +125,21 @@ public:
                 room_.leave(shared_from_this());
             }
                         });
+    }
+
+    void on_read(boost::beast::error_code ec, std::size_t bytes_trans) {
+        if(!ec) {
+            std::stringstream message;
+            ws_.text(ws_.got_text());
+            std::ostringstream os;
+            os << boost::beast::make_printable(buffer_.data());
+            read_message = os.str();
+            room_.deliver(read_message);
+            do_read();
+        }
+        else {
+            room_.leave(shared_from_this());
+        }
     }
 
     void do_write() {
