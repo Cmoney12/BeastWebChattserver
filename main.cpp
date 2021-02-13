@@ -31,7 +31,10 @@ class chat_room {
 public:
     void join(const chat_participant_ptr& chat_participant) {
         participants_.insert(chat_participant);
-        std::cout << "inserted user";
+        chat_participant->deliver("Welcome to chat\n\r");
+        std::cout << "Connected" << std::endl;
+        for (const auto& message: recent_message)
+            chat_participant->deliver(message);
     }
 
     void leave(const chat_participant_ptr& participant)
@@ -72,7 +75,7 @@ public:
     }
 
     void run() {
-        room_.join(shared_from_this());
+
         net::dispatch(ws_.get_executor(),
                       beast::bind_front_handler(&session::on_run, shared_from_this()));
     }
@@ -92,17 +95,17 @@ public:
 
         if (ec)
             return fail(ec, "accept");
-
+        room_.join(shared_from_this());
         do_read();
     }
 
-    void deliver(const std::string& msg)
+    void deliver(const std::string& msg) override
     {
         bool write_in_progress = !write_message.empty();
         write_message.push_back(msg);
         if (!write_in_progress)
         {
-            do_write();
+            async_write();
         }
     }
 
@@ -112,12 +115,13 @@ public:
                         {
             if(!ec) {
                 on_read(ec, size);
-                ws_.text(ws_.got_text());
-                std::ostringstream os;
-                os << boost::beast::make_printable(buffer_.data());
-                read_message = os.str();
-                write_message.push_front(read_message);
-                do_read();
+                //ws_.text(ws_.got_text());
+                //std::ostringstream os;
+                //os << boost::beast::make_printable(buffer_.data());
+                //read_message = os.str();
+                //std::cout << read_message;
+                //write_message.push_front(read_message);
+                //do_read();
             }
             else {
                 room_.leave(shared_from_this());
@@ -132,28 +136,35 @@ public:
             std::ostringstream os;
             os << boost::beast::make_printable(buffer_.data());
             read_message = os.str();
+            buffer_.consume(bytes_trans);
             room_.deliver(read_message);
             do_read();
         }
         else {
-            room_.leave(shared_from_this());
+            return fail(ec, "on_read");
+            //room_.leave(shared_from_this());
         }
     }
 
-    void do_write() {
-        auto self(shared_from_this());
+    void async_write() {
         ws_.async_write(net::buffer(write_message.front().data(), write_message.front().length()),
-                        [this, self](boost::system::error_code ec, std::size_t size) {
-            if(!ec) {
-                write_message.pop_front();
-                if (!write_message.empty()) {
-                    do_write();
-                }
-            }
-            else {
-                room_.leave(shared_from_this());
-            }
-        });
+                        beast::bind_front_handler(&session::on_write, shared_from_this()));
+    }
+
+    void on_write(
+            beast::error_code ec,
+            std::size_t bytes_transferred)
+    {
+        boost::ignore_unused(bytes_transferred);
+
+        if(ec)
+            return fail(ec, "write");
+
+        // Clear the buffer
+        buffer_.consume(buffer_.size());
+
+        // Do another read
+        async_write();
     }
 
     std::string read_message;
@@ -220,7 +231,7 @@ int main()
 {
     auto const address = net::ip::make_address(reinterpret_cast<const char *>("127.0.0.1"));
     auto const port = static_cast<unsigned short>(8080);
-    //auto const threads = std::max<int>(1,(1));
+    auto const threads = std::max<int>(1,(1));
 
     // The io_context is required for all I/O
     //net::io_context ioc{threads};
@@ -230,9 +241,15 @@ int main()
     //listener listen(io_context, tcp::endpoint{address, port});
     //listen.run();
     std::make_shared<listener>(io_context, tcp::endpoint{address, port})->run();
-
     // Run the I/O service on the requested number of threads
-
+    std::vector<std::thread> v;
+    v.reserve(threads - 1);
+    for(auto i = threads - 1; i > 0; --i)
+        v.emplace_back(
+                [&io_context]
+                {
+                   io_context.run();
+                });
     io_context.run();
 
     return EXIT_SUCCESS;

@@ -10,5 +10,5 @@ ENDIF(Boost_FOUND)
 
 SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_REGEX_LIBRARY})
 
-add_executable(beastclientexample main.cpp chat_message.hpp)
-TARGET_LINK_LIBRARIES(beastclientexample ${USED_LIBS})
+add_executable(BeastWebChattserver main.cpp chat_message.hpp)
+TARGET_LINK_LIBRARIES(BeastWebChattserver ${USED_LIBS})
