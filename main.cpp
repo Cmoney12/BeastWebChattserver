@@ -58,8 +58,7 @@ private:
 
 };
 
-void
-fail(beast::error_code ec, char const* what)
+void fail(beast::error_code ec, char const* what)
 {
     std::cerr << what << ": " << ec.message() << "\n";
 }
@@ -163,8 +162,10 @@ public:
         // Clear the buffer
         buffer_.consume(buffer_.size());
 
-        // Do another read
-        async_write();
+        // write more
+        write_message.pop_front();
+        if(!write_message.empty())
+            async_write();
     }
 
     std::string read_message;
