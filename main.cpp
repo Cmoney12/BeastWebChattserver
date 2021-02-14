@@ -31,7 +31,7 @@ class chat_room {
 public:
     void join(const chat_participant_ptr& chat_participant) {
         participants_.insert(chat_participant);
-        chat_participant->deliver("Welcome to chat\n\r");
+        //chat_participant->deliver("Welcome to chat\n\r");
         std::cout << "Connected" << std::endl;
         for (const auto& message: recent_message)
             chat_participant->deliver(message);
@@ -40,6 +40,7 @@ public:
     void leave(const chat_participant_ptr& participant)
     {
         participants_.erase(participant);
+        std::cout << "Left " << participants_.size() << std::endl;
     }
 
     void deliver(const std::string& message) {
@@ -60,6 +61,9 @@ private:
 
 void fail(beast::error_code ec, char const* what)
 {
+    if( ec == net::error::operation_aborted ||
+        ec == websocket::error::closed)
+        return;
     std::cerr << what << ": " << ec.message() << "\n";
 }
 
@@ -92,10 +96,13 @@ public:
 
     void on_accept(beast::error_code ec) {
 
-        if (ec)
+        if(!ec) {
+            room_.join(shared_from_this());
+            do_read();
+        }
+        else {
             return fail(ec, "accept");
-        room_.join(shared_from_this());
-        do_read();
+        }
     }
 
     void deliver(const std::string& msg) override
@@ -104,7 +111,8 @@ public:
         write_message.push_back(msg);
         if (!write_in_progress)
         {
-            async_write();
+            net::post(ws_.get_executor(), beast::bind_front_handler(&session::on_deliver, shared_from_this()));
+            //async_write();
         }
     }
 
@@ -114,13 +122,6 @@ public:
                         {
             if(!ec) {
                 on_read(ec, size);
-                //ws_.text(ws_.got_text());
-                //std::ostringstream os;
-                //os << boost::beast::make_printable(buffer_.data());
-                //read_message = os.str();
-                //std::cout << read_message;
-                //write_message.push_front(read_message);
-                //do_read();
             }
             else {
                 room_.leave(shared_from_this());
@@ -140,33 +141,56 @@ public:
             do_read();
         }
         else {
+            room_.leave(shared_from_this());
             return fail(ec, "on_read");
             //room_.leave(shared_from_this());
         }
     }
 
-    void async_write() {
+    void on_deliver() {
+        //are we already writing?
+        if(write_message.size() > 1) {
+            return;
+        }
+        ws_.async_write(net::buffer(write_message.front()),
+                        beast::bind_front_handler(&session::on_write, shared_from_this()));
+    }
+
+    void on_write(beast::error_code ec, std::size_t size) {
+        if(ec) {
+            return fail(ec, "Write");
+        }
+        write_message.pop_front();
+        if (!write_message.empty()) {
+            ws_.async_write(net::buffer(write_message.front()),
+                            beast::bind_front_handler(&session::on_write,shared_from_this()));
+        }
+    }
+
+    /**void async_write() {
         ws_.async_write(net::buffer(write_message.front().data(), write_message.front().length()),
                         beast::bind_front_handler(&session::on_write, shared_from_this()));
     }
 
-    void on_write(
-            beast::error_code ec,
-            std::size_t bytes_transferred)
+    void on_write(beast::error_code ec, std::size_t bytes_transferred)
     {
         boost::ignore_unused(bytes_transferred);
 
-        if(ec)
-            return fail(ec, "write");
-
         // Clear the buffer
-        buffer_.consume(buffer_.size());
+        //buffer_.consume(buffer_.size());
 
         // write more
-        write_message.pop_front();
-        if(!write_message.empty())
-            async_write();
-    }
+        if(!ec) {
+            write_message.pop_front();
+            if (!write_message.empty()) {
+                async_write();
+            }
+        }
+        else {
+            room_.leave(shared_from_this());
+            return fail(ec, "on_write");
+        }
+    }**/
 
     std::string read_message;
     chat_room& room_;
@@ -231,17 +255,25 @@ private:
 int main()
 {
     auto const address = net::ip::make_address(reinterpret_cast<const char *>("127.0.0.1"));
-    auto const port = static_cast<unsigned short>(8080);
-    auto const threads = std::max<int>(1,(1));
+    auto const port = static_cast<unsigned short>(1234);
+    auto const threads = std::max<int>(1,5);
 
     // The io_context is required for all I/O
     //net::io_context ioc{threads};
     net::io_context io_context;
     // Create and launch a listening port
-    //listener lis(io_context, tcp::endpoint{address, port});
-    //listener listen(io_context, tcp::endpoint{address, port});
-    //listen.run();
     std::make_shared<listener>(io_context, tcp::endpoint{address, port})->run();
+    // Run the I/O service on the requested number of threads
+    net::signal_set signals(io_context, SIGINT, SIGTERM);
+    signals.async_wait(
+            [&io_context](boost::system::error_code const&, int)
+            {
+                // Stop the io_context. This will cause run()
+                // to return immediately, eventually destroying the
+                // io_context and any remaining handlers in it.
+                io_context.stop();
+            });
+
     // Run the I/O service on the requested number of threads
     std::vector<std::thread> v;
     v.reserve(threads - 1);
@@ -249,9 +281,12 @@ int main()
         v.emplace_back(
                 [&io_context]
                 {
-                   io_context.run();
+                    io_context.run();
                 });
     io_context.run();
+    // Block until all the threads exit
+    for(auto& t : v)
+        t.join();
 
     return EXIT_SUCCESS;
 }
