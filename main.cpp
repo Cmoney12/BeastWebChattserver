@@ -78,6 +78,27 @@ public:
     }
 
     void run() {
+        // Set suggested timeout settings for the websocket
+        ws_.set_option(
+                websocket::stream_base::timeout::suggested(
+                        beast::role_type::server));
+
+        // Set a decorator to change the Server of the handshake
+        ws_.set_option(websocket::stream_base::decorator(
+                [](websocket::response_type& res)
+                {
+                    res.set(http::field::server,
+                            std::string(BOOST_BEAST_VERSION_STRING) +
+                            " websocket-chat-multi");
+                }));
+
+        // Accept the websocket handshake
+        ws_.async_accept(beast::bind_front_handler(
+                        &session::on_accept,
+                        shared_from_this()));
+    }
+    /**
+    void run() {
 
         net::dispatch(ws_.get_executor(),
                       beast::bind_front_handler(&session::on_run, shared_from_this()));
@@ -92,7 +113,7 @@ public:
                                                          }));
         //accept handshake
         ws_.async_accept(beast::bind_front_handler(&session::on_accept, shared_from_this()));
-    }
+    }**/
 
     void on_accept(beast::error_code ec) {
 
@@ -143,7 +164,7 @@ public:
         else {
             room_.leave(shared_from_this());
             return fail(ec, "on_read");
-            //room_.leave(shared_from_this());
+            room_.leave(shared_from_this());
         }
     }
 
@@ -158,6 +179,7 @@ public:
 
     void on_write(beast::error_code ec, std::size_t size) {
         if(ec) {
+            //room_.leave(shared_from_this());
             return fail(ec, "Write");
         }
         write_message.pop_front();
@@ -245,6 +267,9 @@ private:
         else {
             std::make_shared<session>(std::move(socket), room_)->run();
         }
+        //each connection gets its own strand
+        acceptor_.async_accept(net::make_strand(ioc_),
+                               beast::bind_front_handler(&listener::on_accept, shared_from_this()));
     }
 
     chat_room room_;
