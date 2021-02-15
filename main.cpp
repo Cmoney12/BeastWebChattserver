@@ -97,23 +97,6 @@ public:
                         &session::on_accept,
                         shared_from_this()));
     }
-    /**
-    void run() {
-
-        net::dispatch(ws_.get_executor(),
-                      beast::bind_front_handler(&session::on_run, shared_from_this()));
-    }
-
-    void on_run() {
-        ws_.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
-        ws_.set_option(websocket::stream_base::decorator([](websocket::response_type& res)
-                                                         {
-            res.set(http::field::server, std::string(BOOST_BEAST_VERSION_STRING)
-            + "websocket-server-async");
-                                                         }));
-        //accept handshake
-        ws_.async_accept(beast::bind_front_handler(&session::on_accept, shared_from_this()));
-    }**/
 
     void on_accept(beast::error_code ec) {
 
@@ -179,7 +162,7 @@ public:
 
     void on_write(beast::error_code ec, std::size_t size) {
         if(ec) {
-            //room_.leave(shared_from_this());
+            room_.leave(shared_from_this());
             return fail(ec, "Write");
         }
         write_message.pop_front();
